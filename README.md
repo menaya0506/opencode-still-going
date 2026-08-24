@@ -1,5 +1,9 @@
 ﻿# opencode-still-going
 
+[![npm](https://img.shields.io/npm/v/opencode-still-going.svg)](https://www.npmjs.com/package/opencode-still-going)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![OpenCode](https://img.shields.io/badge/for-OpenCode-8a5cf6.svg)](https://opencode.ai/docs/plugins/)
+
 An [OpenCode](https://opencode.ai) plugin that automatically sends a `"continue"` prompt when the model stops because repeated retries were exhausted — so long-running tasks keep moving without you babysitting the session.
 
 It **never** fires in two cases:
