@@ -306,10 +306,16 @@ const plugin: Plugin = async ({ client, directory }) => {
       if (event.type === "message.updated") {
         const info = event.properties?.info
         if (!info?.sessionID || info.role !== "assistant") return
+
         if (isRetryableError(info.error, config)) {
           const state = getState(info.sessionID)
           state.pendingContinue = true
           state.lastErrorTime = Date.now()
+          return
+        }
+
+        if (info.finish && !info.error) {
+          resetState(info.sessionID)
         }
       }
     },

@@ -150,6 +150,32 @@ await test("counter resets after natural idle -> can continue again", async () =
   assert.equal(prompts.length, 3)
 })
 
+await test("stale pending from recovered transient error -> NOT sent after successful finish", async () => {
+  const sid = "ses_i"
+  const { client, prompts } = makeClient(sid, { busy: true })
+  const hook = await createPlugin({ client, directory: CONFIG_DIR } as any)
+  await fire(hook, "session.error", { sessionID: sid, error: REAL_503_ERROR })
+  await fire(hook, "session.idle", { sessionID: sid })
+  await wait(300)
+  assert.equal(prompts.length, 0)
+  await fire(hook, "message.updated", { info: { sessionID: sid, role: "assistant", finish: "stop" } })
+  await fire(hook, "session.idle", { sessionID: sid })
+  await wait(300)
+  assert.equal(prompts.length, 0)
+})
+
+await test("real error after a successful turn -> still sent", async () => {
+  const sid = "ses_j"
+  const { client, prompts } = makeClient(sid)
+  const hook = await createPlugin({ client, directory: CONFIG_DIR } as any)
+  await fire(hook, "message.updated", { info: { sessionID: sid, role: "assistant", finish: "stop" } })
+  await wait(150)
+  await fire(hook, "session.error", { sessionID: sid, error: REAL_503_ERROR })
+  await fire(hook, "session.idle", { sessionID: sid })
+  await wait(300)
+  assert.equal(prompts.length, 1)
+})
+
 await test("module exports satisfy opencode loader (functions or {server} only)", async () => {
   const mod = (await import("../src/index.ts")) as Record<string, unknown>
   for (const [name, entry] of Object.entries(mod)) {
