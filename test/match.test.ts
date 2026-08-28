@@ -22,6 +22,15 @@ const REAL_503_ERROR = {
   },
 }
 
+const REASONING_CONTENT_ERROR = {
+  name: "APIError",
+  data: {
+    message: "If thinking mode and tool_calls, reasoning_content must be passed back to the API.",
+    statusCode: 400,
+    isRetryable: false,
+  },
+}
+
 const ABORT_ERROR = { name: "MessageAbortedError", data: { message: "The operation was aborted" } }
 
 function makeClient(sessionID: string, opts: { busy?: boolean; parentID?: string | null } = {}) {
@@ -171,6 +180,16 @@ await test("real error after a successful turn -> still sent", async () => {
   await fire(hook, "message.updated", { info: { sessionID: sid, role: "assistant", finish: "stop" } })
   await wait(150)
   await fire(hook, "session.error", { sessionID: sid, error: REAL_503_ERROR })
+  await fire(hook, "session.idle", { sessionID: sid })
+  await wait(300)
+  assert.equal(prompts.length, 1)
+})
+
+await test("reasoning_content tool_calls 400 error (aggregate provider) -> sent", async () => {
+  const sid = "ses_k"
+  const { client, prompts } = makeClient(sid)
+  const hook = await createPlugin({ client, directory: CONFIG_DIR } as any)
+  await fire(hook, "session.error", { sessionID: sid, error: REASONING_CONTENT_ERROR })
   await fire(hook, "session.idle", { sessionID: sid })
   await wait(300)
   assert.equal(prompts.length, 1)

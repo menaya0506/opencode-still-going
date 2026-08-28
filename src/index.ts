@@ -17,6 +17,8 @@ const DEFAULT_ERROR_PATTERNS = [
   "bad request",
   "reasoning_opaque",
   "prefill",
+  "reasoning_content",
+  "thinking mode and tool_calls",
   "sse read timed out",
   "idle timeout",
   "timeout",
