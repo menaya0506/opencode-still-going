@@ -33,7 +33,7 @@ const REASONING_CONTENT_ERROR = {
 
 const ABORT_ERROR = { name: "MessageAbortedError", data: { message: "The operation was aborted" } }
 
-function makeClient(sessionID: string, opts: { busy?: boolean; parentID?: string | null } = {}) {
+function makeClient(sessionID: string, opts: { busy?: boolean; parentID?: string | null; lastMessageError?: boolean } = {}) {
   const prompts: any[] = []
   return {
     prompts,
@@ -42,6 +42,17 @@ function makeClient(sessionID: string, opts: { busy?: boolean; parentID?: string
       session: {
         status: async () => ({ data: { [sessionID]: { type: opts.busy ? "busy" : "idle" } } }),
         get: async () => ({ data: { id: sessionID, parentID: opts.parentID ?? null } }),
+        messages: async () => ({
+          data: [
+            {
+              info: {
+                sessionID,
+                role: "assistant",
+                ...(opts.lastMessageError === false ? {} : { error: REAL_503_ERROR }),
+              },
+            },
+          ],
+        }),
         promptAsync: async (o: any) => {
           prompts.push(o)
         },
@@ -193,6 +204,16 @@ await test("reasoning_content tool_calls 400 error (aggregate provider) -> sent"
   await fire(hook, "session.idle", { sessionID: sid })
   await wait(300)
   assert.equal(prompts.length, 1)
+})
+
+await test("stale pending but last message has NO error -> NOT sent (authoritative check)", async () => {
+  const sid = "ses_l"
+  const { client, prompts } = makeClient(sid, { lastMessageError: false })
+  const hook = await createPlugin({ client, directory: CONFIG_DIR } as any)
+  await fire(hook, "session.error", { sessionID: sid, error: REAL_503_ERROR })
+  await fire(hook, "session.idle", { sessionID: sid })
+  await wait(300)
+  assert.equal(prompts.length, 0)
 })
 
 await test("module exports satisfy opencode loader (functions or {server} only)", async () => {

@@ -201,6 +201,38 @@ const plugin: Plugin = async ({ client, directory }) => {
     }
   }
 
+  async function getStatus(sessionID: string): Promise<string> {
+    try {
+      const res = (await client.session.status()) as any
+      const status = res?.data?.[sessionID] ?? res?.[sessionID]
+      return String(status?.type ?? status?.status ?? "unknown")
+    } catch {
+      return "unknown"
+    }
+  }
+
+  async function lastMessageHasError(sessionID: string): Promise<boolean | null> {
+    try {
+      const res = (await client.session.messages({
+        path: { id: sessionID },
+        query: { limit: 1 },
+      })) as any
+      const messages = res?.data ?? res
+      const last = Array.isArray(messages) ? messages[messages.length - 1] : undefined
+      const info = last?.info ?? last
+      if (!info) return null
+      return info.role === "assistant" && Boolean(info.error)
+    } catch {
+      return null
+    }
+  }
+
+  function log(level: "debug" | "info" | "warn" | "error", message: string) {
+    return client.app
+      .log({ body: { service: "still-going", level, message } })
+      .catch(() => {})
+  }
+
   async function sendContinue(sessionID: string) {
     const state = sessions.get(sessionID)
     if (!state?.pendingContinue) return
@@ -210,17 +242,22 @@ const plugin: Plugin = async ({ client, directory }) => {
 
     if (config.maxConsecutive > 0 && state.consecutiveCount >= config.maxConsecutive) {
       state.pendingContinue = false
-      await client.app.log({
-        body: {
-          service: "still-going",
-          level: "warn",
-          message: `max consecutive (${config.maxConsecutive}) reached for ${sessionID}, giving up`,
-        },
-      })
+      await log("warn", `max consecutive (${config.maxConsecutive}) reached for ${sessionID}, giving up`)
       return
     }
 
-    if (await isBusy(sessionID)) return
+    if (await isBusy(sessionID)) {
+      await log("debug", `skip send ${sessionID}: busy`)
+      return
+    }
+
+    const hasError = await lastMessageHasError(sessionID)
+    if (hasError === false) {
+      await log("debug", `skip send ${sessionID}: last message has no error (stale pending), resetting`)
+      resetState(sessionID)
+      return
+    }
+
     if (await isSubagent(sessionID)) {
       state.pendingContinue = false
       return
@@ -230,13 +267,10 @@ const plugin: Plugin = async ({ client, directory }) => {
     state.consecutiveCount++
     state.pendingContinue = false
 
-    await client.app.log({
-      body: {
-        service: "still-going",
-        level: "info",
-        message: `sending "${config.message}" to ${sessionID} (attempt ${state.consecutiveCount}/${config.maxConsecutive > 0 ? config.maxConsecutive : "\u221e"})`,
-      },
-    })
+    await log(
+      "info",
+      `sending "${config.message}" to ${sessionID} (attempt ${state.consecutiveCount}/${config.maxConsecutive > 0 ? config.maxConsecutive : "\u221e"})`,
+    )
 
     try {
       await client.session.promptAsync({
@@ -245,14 +279,16 @@ const plugin: Plugin = async ({ client, directory }) => {
           parts: [{ type: "text", text: config.message }],
         },
       })
+      await log("info", `sent "${config.message}" to ${sessionID}`)
+      setTimeout(async () => {
+        const status = await getStatus(sessionID)
+        await log("debug", `post-send check ${sessionID}: status=${status}`)
+        if (status === "idle") {
+          await log("warn", `possible dropped generation: ${sessionID} still idle after send`)
+        }
+      }, 4000)
     } catch (err) {
-      await client.app.log({
-        body: {
-          service: "still-going",
-          level: "error",
-          message: `failed to send continue to ${sessionID}: ${err}`,
-        },
-      })
+      await log("error", `failed to send continue to ${sessionID}: ${err}`)
     }
   }
 
@@ -261,17 +297,12 @@ const plugin: Plugin = async ({ client, directory }) => {
       if (event.type === "session.error") {
         const { sessionID, error } = event.properties ?? {}
         if (!sessionID || !config.enabled) return
+        await log("debug", `event session.error ${sessionID}: ${errorText(error).slice(0, 150)}`)
         if (isRetryableError(error, config)) {
           const state = getState(sessionID)
           state.lastErrorTime = Date.now()
           state.pendingContinue = true
-          await client.app.log({
-            body: {
-              service: "still-going",
-              level: "info",
-              message: `retryable error in ${sessionID}: ${errorText(error).slice(0, 200)}`,
-            },
-          })
+          await log("info", `retryable error in ${sessionID}: ${errorText(error).slice(0, 200)}`)
         }
         return
       }
@@ -281,6 +312,7 @@ const plugin: Plugin = async ({ client, directory }) => {
         if (!sessionID || !config.enabled) return
 
         const state = sessions.get(sessionID)
+        await log("debug", `event session.idle ${sessionID}: pending=${Boolean(state?.pendingContinue)}`)
         if (!state?.pendingContinue) {
           resetState(sessionID)
           return
