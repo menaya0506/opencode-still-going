@@ -31,6 +31,13 @@ const REASONING_CONTENT_ERROR = {
   },
 }
 
+const CONTENT_FILTER_ERROR = {
+  name: "ContentFilterError",
+  data: {
+    message: "The response was blocked by the provider's content filter",
+  },
+}
+
 const ABORT_ERROR = { name: "MessageAbortedError", data: { message: "The operation was aborted" } }
 
 function makeClient(sessionID: string, opts: { busy?: boolean; parentID?: string | null; lastMessageError?: boolean } = {}) {
@@ -214,6 +221,28 @@ await test("stale pending but last message has NO error -> NOT sent (authoritati
   await fire(hook, "session.idle", { sessionID: sid })
   await wait(300)
   assert.equal(prompts.length, 0)
+})
+
+await test("content filter error (aggregate provider false positive) -> sent", async () => {
+  const sid = "ses_m"
+  const { client, prompts } = makeClient(sid)
+  const hook = await createPlugin({ client, directory: CONFIG_DIR } as any)
+  await fire(hook, "session.error", { sessionID: sid, error: CONTENT_FILTER_ERROR })
+  await fire(hook, "session.idle", { sessionID: sid })
+  await wait(300)
+  assert.equal(prompts.length, 1)
+})
+
+await test("content filter error on message with finish:content-filter -> sent, not reset", async () => {
+  const sid = "ses_n"
+  const { client, prompts } = makeClient(sid)
+  const hook = await createPlugin({ client, directory: CONFIG_DIR } as any)
+  await fire(hook, "message.updated", {
+    info: { sessionID: sid, role: "assistant", finish: "content-filter", error: CONTENT_FILTER_ERROR },
+  })
+  await fire(hook, "session.idle", { sessionID: sid })
+  await wait(300)
+  assert.equal(prompts.length, 1)
 })
 
 await test("module exports satisfy opencode loader (functions or {server} only)", async () => {

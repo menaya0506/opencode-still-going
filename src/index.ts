@@ -19,6 +19,8 @@ const DEFAULT_ERROR_PATTERNS = [
   "prefill",
   "reasoning_content",
   "thinking mode and tool_calls",
+  "content filter",
+  "contentfiltererror",
   "sse read timed out",
   "idle timeout",
   "timeout",
