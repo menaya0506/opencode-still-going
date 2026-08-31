@@ -42,8 +42,10 @@ const ABORT_ERROR = { name: "MessageAbortedError", data: { message: "The operati
 
 function makeClient(sessionID: string, opts: { busy?: boolean; parentID?: string | null; lastMessageError?: boolean } = {}) {
   const prompts: any[] = []
+  const replies: any[] = []
   return {
     prompts,
+    replies,
     client: {
       app: { log: async () => {} },
       session: {
@@ -62,6 +64,9 @@ function makeClient(sessionID: string, opts: { busy?: boolean; parentID?: string
         }),
         promptAsync: async (o: any) => {
           prompts.push(o)
+        },
+        prompt: async (o: any) => {
+          replies.push(o)
         },
       },
     },
@@ -305,6 +310,46 @@ await test("invalid JSON config -> defaults used, no crash", async () => {
   } finally {
     process.env.XDG_CONFIG_HOME = CONFIG_DIR
   }
+})
+
+await test("/still registers command via config hook", async () => {
+  const { client } = makeClient("ses_s")
+  const hook = await createPlugin({ client, directory: CONFIG_DIR } as any)
+  const cfg: any = {}
+  await hook.config?.(cfg)
+  assert.ok(cfg.command?.still, "still command not registered")
+})
+
+await test("/still status replies with current config", async () => {
+  const sid = "ses_t"
+  const { client, replies } = makeClient(sid)
+  const hook = await createPlugin({ client, directory: CONFIG_DIR } as any)
+  await assert.rejects(
+    hook["command.execute.before"]({ command: "still", sessionID: sid, arguments: "status" }, {}),
+    /__STILL_HANDLED__/,
+  )
+  assert.equal(replies.length, 1)
+  assert.ok(replies[0].body.parts[0].text.includes("delay=30ms"), replies[0].body.parts[0].text)
+})
+
+await test("/still reload picks up config changes dynamically", async () => {
+  const sid = "ses_u"
+  const { client, prompts, replies } = makeClient(sid)
+  const hook = await createPlugin({ client, directory: CONFIG_DIR } as any)
+  const cfgPath = join(CONFIG_DIR, "opencode", "still-going.json")
+  const before = JSON.parse(readFileSync(cfgPath, "utf-8"))
+  writeFileSync(cfgPath, JSON.stringify({ ...before, delayMs: 600 }))
+  await assert.rejects(
+    hook["command.execute.before"]({ command: "still", sessionID: sid, arguments: "reload" }, {}),
+    /__STILL_HANDLED__/,
+  )
+  assert.ok(replies[0].body.parts[0].text.includes("delay=600ms"), replies[0].body.parts[0].text)
+  await fire(hook, "session.error", { sessionID: sid, error: REAL_503_ERROR })
+  await fire(hook, "session.idle", { sessionID: sid })
+  await wait(500)
+  assert.equal(prompts.length, 0, "old 30ms delay would have fired; reload must take effect")
+  await wait(400)
+  assert.equal(prompts.length, 1)
 })
 
 await test("module exports satisfy opencode loader (functions or {server} only)", async () => {

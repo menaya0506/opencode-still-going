@@ -73,6 +73,17 @@ Optional. Two locations are supported — the project file overrides the global 
 
 If the global file does not exist, it is **auto-created with the default values** on first load (you can then edit it). Invalid JSON (e.g. a stray character or BOM issue) is reported in the logs (`config file ... is not valid JSON, using defaults`) and the defaults are used instead — the failure is never silent.
 
+### Slash command
+
+The plugin registers a `/still` command:
+
+| Command | Effect |
+| --- | --- |
+| `/still status` | Shows the currently effective config values |
+| `/still reload` | Re-reads the config files **without restarting** OpenCode |
+
+Both reply in the session with the effective values (`enabled, delay, throttle, max, message`).
+
 ```json
 {
   "enabled": true,

@@ -173,7 +173,8 @@ const plugin: Plugin = async ({ client, directory }) => {
   function log(level: "debug" | "info" | "warn" | "error", message: string) {
     return client.app.log({ body: { service: "still-going", level, message } }).catch(() => {})
   }
-  const config = await loadConfig(directory, (message) => void log("warn", message))
+  const warn = (message: string) => void log("warn", message)
+  let config = await loadConfig(directory, warn)
   await client.app
     .log({
       body: {
@@ -376,6 +377,41 @@ const plugin: Plugin = async ({ client, directory }) => {
           resetState(info.sessionID)
         }
       }
+    },
+    config: async (cfg: any) => {
+      cfg.command ??= {}
+      cfg.command["still"] = {
+        template: "",
+        description: "Reload or show still-going plugin config",
+      }
+    },
+    "command.execute.before": async (input: any) => {
+      if (input.command !== "still") return
+      const args = (input.arguments ?? "").trim().split(/\s+/).filter(Boolean)
+      const sub = args[0]?.toLowerCase() ?? ""
+      const sid: string = input.sessionID
+      let text: string
+      if (sub === "reload") {
+        config = await loadConfig(directory, warn)
+        text = `config reloaded: enabled=${config.enabled}, delay=${config.delayMs}ms, throttle=${config.throttleMs}ms, max=${config.maxConsecutive}, message="${config.message}"`
+      } else if (sub === "status") {
+        text = `enabled=${config.enabled}, delay=${config.delayMs}ms, throttle=${config.throttleMs}ms, max=${config.maxConsecutive}, message="${config.message}"`
+      } else {
+        text = "usage: /still reload | /still status"
+      }
+      await log("info", `command /still ${sub} in ${sid}`)
+      try {
+        await client.session.prompt({
+          path: { id: sid },
+          body: {
+            noReply: true,
+            parts: [{ type: "text", text, ignored: true }],
+          },
+        })
+      } catch (err) {
+        await log("error", `failed to reply to /still in ${sid}: ${err}`)
+      }
+      throw new Error("__STILL_HANDLED__")
     },
   }
 }
