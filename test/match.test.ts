@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -243,6 +243,68 @@ await test("content filter error on message with finish:content-filter -> sent, 
   await fire(hook, "session.idle", { sessionID: sid })
   await wait(300)
   assert.equal(prompts.length, 1)
+})
+
+await test("auto-creates global config with defaults when missing, then works", async () => {
+  const fresh = mkdtempSync(join(tmpdir(), "still-going-fresh-"))
+  process.env.XDG_CONFIG_HOME = fresh
+  try {
+    const sid = "ses_o"
+    const { client, prompts } = makeClient(sid)
+    const hook = await createPlugin({ client, directory: CONFIG_DIR } as any)
+    const created = join(fresh, "opencode", "still-going.json")
+    assert.equal(existsSync(created), true)
+    const parsed = JSON.parse(readFileSync(created, "utf-8"))
+    assert.equal(parsed.enabled, true)
+    assert.equal(parsed.delayMs, 1000)
+    await fire(hook, "session.error", { sessionID: sid, error: REAL_503_ERROR })
+    await fire(hook, "session.idle", { sessionID: sid })
+    await wait(1600)
+    assert.equal(prompts.length, 1)
+  } finally {
+    process.env.XDG_CONFIG_HOME = CONFIG_DIR
+  }
+})
+
+await test("BOM-prefixed config file is still parsed (delay respected)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "still-going-bom-"))
+  mkdirSync(join(dir, "opencode"), { recursive: true })
+  writeFileSync(
+    join(dir, "opencode", "still-going.json"),
+    "\uFEFF" + JSON.stringify({ delayMs: 2000 }, null, 2),
+  )
+  process.env.XDG_CONFIG_HOME = dir
+  try {
+    const sid = "ses_p"
+    const { client, prompts } = makeClient(sid)
+    const hook = await createPlugin({ client, directory: CONFIG_DIR } as any)
+    await fire(hook, "session.error", { sessionID: sid, error: REAL_503_ERROR })
+    await fire(hook, "session.idle", { sessionID: sid })
+    await wait(1500)
+    assert.equal(prompts.length, 0, "default 1000ms would have fired by now; BOM must not break parsing")
+    await wait(1000)
+    assert.equal(prompts.length, 1)
+  } finally {
+    process.env.XDG_CONFIG_HOME = CONFIG_DIR
+  }
+})
+
+await test("invalid JSON config -> defaults used, no crash", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "still-going-invalid-"))
+  mkdirSync(join(dir, "opencode"), { recursive: true })
+  writeFileSync(join(dir, "opencode", "still-going.json"), "0{\"enabled\": true,}")
+  process.env.XDG_CONFIG_HOME = dir
+  try {
+    const sid = "ses_q"
+    const { client, prompts } = makeClient(sid)
+    const hook = await createPlugin({ client, directory: CONFIG_DIR } as any)
+    await fire(hook, "session.error", { sessionID: sid, error: REAL_503_ERROR })
+    await fire(hook, "session.idle", { sessionID: sid })
+    await wait(1600)
+    assert.equal(prompts.length, 1)
+  } finally {
+    process.env.XDG_CONFIG_HOME = CONFIG_DIR
+  }
 })
 
 await test("module exports satisfy opencode loader (functions or {server} only)", async () => {

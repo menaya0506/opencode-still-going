@@ -1,5 +1,6 @@
-﻿import { readFile } from "node:fs/promises"
-import { join } from "node:path"
+﻿import { access, mkdir, readFile, writeFile } from "node:fs/promises"
+import { homedir } from "node:os"
+import { dirname, join } from "node:path"
 import type { Plugin } from "@opencode-ai/plugin"
 
 interface Config {
@@ -73,8 +74,7 @@ interface SessionState {
 const CONFIG_FILE = "still-going.json"
 
 function globalConfigPath(): string {
-  const home = process.env.HOME || process.env.USERPROFILE || ""
-  const xdgConfig = process.env.XDG_CONFIG_HOME || join(home, ".config")
+  const xdgConfig = process.env.XDG_CONFIG_HOME || join(homedir(), ".config")
   return join(xdgConfig, "opencode", CONFIG_FILE)
 }
 
@@ -82,10 +82,30 @@ function projectConfigPath(directory: string): string {
   return join(directory, ".opencode", CONFIG_FILE)
 }
 
-async function readConfigFile(path: string): Promise<Record<string, unknown> | null> {
+async function ensureConfigFile(path: string) {
   try {
-    return JSON.parse(await readFile(path, "utf-8")) as Record<string, unknown>
+    await access(path)
   } catch {
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, JSON.stringify(DEFAULTS, null, 2) + "\n", "utf-8")
+  }
+}
+
+async function readConfigFile(
+  path: string,
+  warn: (message: string) => void,
+): Promise<Record<string, unknown> | null> {
+  let raw: string
+  try {
+    raw = await readFile(path, "utf-8")
+  } catch {
+    return null
+  }
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1)
+  try {
+    return JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    warn(`config file ${path} is not valid JSON, using defaults`)
     return null
   }
 }
@@ -105,11 +125,16 @@ function applyParsed(config: Config, parsed: Record<string, unknown>) {
   }
 }
 
-async function loadConfig(directory: string): Promise<Config> {
+async function loadConfig(
+  directory: string,
+  warn: (message: string) => void,
+): Promise<Config> {
   const config: Config = { ...DEFAULTS }
-  const global = await readConfigFile(globalConfigPath())
+  const globalPath = globalConfigPath()
+  await ensureConfigFile(globalPath)
+  const global = await readConfigFile(globalPath, warn)
   if (global) applyParsed(config, global)
-  const project = await readConfigFile(projectConfigPath(directory))
+  const project = await readConfigFile(projectConfigPath(directory), warn)
   if (project) applyParsed(config, project)
   return config
 }
@@ -145,13 +170,16 @@ function isRetryableError(error: unknown, config: Config): boolean {
 }
 
 const plugin: Plugin = async ({ client, directory }) => {
-  const config = await loadConfig(directory)
+  function log(level: "debug" | "info" | "warn" | "error", message: string) {
+    return client.app.log({ body: { service: "still-going", level, message } }).catch(() => {})
+  }
+  const config = await loadConfig(directory, (message) => void log("warn", message))
   await client.app
     .log({
       body: {
         service: "still-going",
         level: "info",
-        message: `loaded (enabled=${config.enabled}, delay=${config.delayMs}ms, throttle=${config.throttleMs}ms, max=${config.maxConsecutive}, message="${config.message}")`,
+        message: `loaded (config=${globalConfigPath()} | project=${projectConfigPath(directory)}) enabled=${config.enabled}, delay=${config.delayMs}ms, throttle=${config.throttleMs}ms, max=${config.maxConsecutive}, message="${config.message}"`,
       },
     })
     .catch(() => {})
@@ -227,12 +255,6 @@ const plugin: Plugin = async ({ client, directory }) => {
     } catch {
       return null
     }
-  }
-
-  function log(level: "debug" | "info" | "warn" | "error", message: string) {
-    return client.app
-      .log({ body: { service: "still-going", level, message } })
-      .catch(() => {})
   }
 
   async function sendContinue(sessionID: string) {

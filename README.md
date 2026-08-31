@@ -71,6 +71,8 @@ Optional. Two locations are supported — the project file overrides the global 
 <your-project>/.opencode/still-going.json
 ```
 
+If the global file does not exist, it is **auto-created with the default values** on first load (you can then edit it). Invalid JSON (e.g. a stray character or BOM issue) is reported in the logs (`config file ... is not valid JSON, using defaults`) and the defaults are used instead — the failure is never silent.
+
 ```json
 {
   "enabled": true,
@@ -98,11 +100,12 @@ Setting `errorPatterns` or `excludePatterns` replaces the entire default list.
 ### Default match patterns
 
 ```
-bad request · reasoning_opaque · prefill · sse read timed out · idle timeout ·
-timeout · contextoverflowerror · too large to compact · econnrefused · econnreset ·
-econnaborted · fetch failed · socket hang up · connection closed · connection error ·
-overloaded · rate limit · unavailable · upstream request failed · server error ·
-bad gateway · gateway timeout · invalid diff · json parsing failed ·
+bad request · reasoning_opaque · prefill · reasoning_content · thinking mode and tool_calls ·
+content filter · contentfiltererror · sse read timed out · idle timeout · timeout ·
+contextoverflowerror · too large to compact · econnrefused · econnreset · econnaborted ·
+fetch failed · socket hang up · connection closed · connection error · overloaded ·
+rate limit · unavailable · upstream request failed · server error · bad gateway ·
+gateway timeout · invalid diff · json parsing failed ·
 tool_use ids were found without tool_result
 ```
 
